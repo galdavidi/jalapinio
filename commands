@@ -1,0 +1,6 @@
+*** command doc ***
+ls
+echo "hello world"
+pwd
+whoami
+exit
